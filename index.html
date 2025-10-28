@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <title>ERC20 Approve — Local Hardhat</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <style>
+        :root {
+            --bg: #0f1724;
+            --card: #101826;
+            --muted: #9aa4b2;
+            --accent: #f6b042
+        }
+
+        body {
+            margin: 0;
+            background: linear-gradient(180deg, #0a1222, #0d1526);
+            font-family: Inter, system-ui, Segoe UI, Roboto, Arial;
+            color: #e6eef6
+        }
+
+        .wrap {
+            max-width: 980px;
+            margin: 40px auto;
+            padding: 0 16px;
+            display: grid;
+            grid-template-columns: 320px 1fr;
+            gap: 16px
+        }
+
+        .card {
+            background: linear-gradient(180deg, rgba(255, 255, 255, .03), rgba(255, 255, 255, .02));
+            border: 1px solid rgba(255, 255, 255, .06);
+            border-radius: 14px;
+            padding: 16px
+        }
+
+        h2 {
+            margin: 0 0 8px 0;
+            font-size: 18px
+        }
+
+        label {
+            font-size: 12px;
+            color: var(--muted)
+        }
+
+        input {
+            width: 100%;
+            padding: 10px;
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, .1);
+            background: transparent;
+            color: #fff;
+            margin-top: 6px;
+            box-sizing: border-box
+        }
+
+        .row {
+            display: flex;
+            gap: 8px
+        }
+
+        .btn {
+            background: var(--accent);
+            color: #071024;
+            border: none;
+            border-radius: 10px;
+            padding: 10px 12px;
+            cursor: pointer;
+            font-weight: 700
+        }
+
+        .btn.secondary {
+            background: transparent;
+            border: 1px solid rgba(255, 255, 255, .15);
+            color: #c9d1e5
+        }
+
+        .kv {
+            display: flex;
+            justify-content: space-between;
+            font-size: 13px;
+            margin-top: 6px
+        }
+
+        .status {
+            font-size: 13px;
+            margin-top: 8px;
+            color: #cfe6ff
+        }
+
+        #historyBox {
+            display: none;
+            margin-top: 12px;
+            max-height: 200px;
+            overflow-y: auto;
+            font-size: 13px;
+            padding: 10px;
+            border: 1px solid rgba(255, 255, 255, .1);
+            border-radius: 10px;
+        }
+
+        #historyList div {
+            margin-bottom: 8px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="wrap">
+        <!-- LEFT: Connection & Wallet -->
+        <div class="card">
+            <h2>Connection</h2>
+            <label>RPC URL</label>
+            <input id="rpc" value="http://127.0.0.1:8545" />
+
+            <h2 style="margin-top:12px">Unlock</h2>
+            <label>Private key</label>
+            <input id="pk" placeholder="0x... (Hardhat account #0)" />
+            <div class="row" style="margin-top:8px">
+                <button id="connect" class="btn">Connect</button>
+                <button id="connectMM" class="btn secondary">Connect MetaMask</button>
+                <button id="logout" class="btn secondary">Logout</button>
+            </div>
+
+            <div id="walletBox" style="display:none;margin-top:12px">
+                <div class="kv">
+                    <div>Address</div>
+                    <div id="addr"></div>
+                </div>
+                <div class="kv">
+                    <div>ETH</div>
+                    <div id="ethBal">—</div>
+                </div>
+            </div>
+
+            <div class="status" id="status">Not connected</div>
+        </div>
+
+        <!-- RIGHT: Token & Approvals -->
+        <div class="card">
+            <h2>ERC20 Approvals</h2>
+            <label>Token address</label>
+            <input id="token" placeholder="0x..." value="0x5FbDB2315678afecb367f032d93F642f64180aa3" />
+
+            <div class="row" style="margin-top:10px">
+                <button id="loadToken" class="btn secondary">Load token</button>
+            </div>
+
+            <div class="kv" style="margin-top:10px">
+                <div>Name</div>
+                <div id="tName">—</div>
+            </div>
+            <div class="kv">
+                <div>Symbol</div>
+                <div id="tSymbol">—</div>
+            </div>
+            <div class="kv">
+                <div>Your token</div>
+                <div id="tBal">—</div>
+            </div>
+
+            <label style="margin-top:12px">Spender address</label>
+            <input id="spender" placeholder="0x..." />
+
+            <label style="margin-top:12px">Amount</label>
+            <input id="amount" type="number" placeholder="1000" />
+
+            <div class="row" style="margin-top:10px">
+                <button id="checkAllow" class="btn secondary">Check allowance</button>
+                <button id="approve" class="btn">Approve</button>
+                <button id="revoke" class="btn secondary">Revoke</button>
+            </div>
+
+            <div class="status" id="tStatus">Token not loaded</div>
+            <div class="kv">
+                <div>Allowance</div>
+                <div id="allowance">—</div>
+            </div>
+
+            <button id="historyBtn" class="btn secondary" style="margin-top:14px">📜 View History</button>
+            <div id="historyBox"><strong>Lịch sử giao dịch:</strong>
+                <div id="historyList"></div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { ethers } from "https://cdn.jsdelivr.net/npm/ethers@6.7.0/dist/ethers.min.js";
+
+        let provider, signer, token;
+        let decimals = 18;
+        const $ = id => document.getElementById(id);
+
+        const ABI = [
+            "function name() view returns (string)",
+            "function symbol() view returns (string)",
+            "function decimals() view returns (uint8)",
+            "function balanceOf(address) view returns (uint256)",
+            "function allowance(address, address) view returns (uint256)",
+            "function approve(address, uint256) returns (bool)",
+            "event Transfer(address indexed,address indexed,uint256)",
+            "event Approval(address indexed,address indexed,uint256)"
+        ];
+
+        function note(id, msg) { $(id).textContent = msg; }
+        function isAddr(x) { try { return ethers.isAddress(x); } catch { return false; } }
+        const short = a => a.slice(0, 6) + "..." + a.slice(-4);
+
+        async function connect() {
+            provider = new ethers.JsonRpcProvider($("rpc").value.trim());
+            signer = new ethers.Wallet($("pk").value.trim(), provider);
+            $("walletBox").style.display = "block";
+            $("addr").textContent = short(signer.address);
+            const eth = await provider.getBalance(signer.address);
+            $("ethBal").textContent = ethers.formatEther(eth);
+            note("status", "✅ Connected");
+        }
+
+        async function loadToken() {
+            token = new ethers.Contract($("token").value.trim(), ABI, signer);
+            const [n, s, d, b] = await Promise.all([
+                token.name(), token.symbol(), token.decimals(), token.balanceOf(signer.address)
+            ]);
+            decimals = Number(d);
+            $("tName").textContent = n;
+            $("tSymbol").textContent = s;
+            $("tBal").textContent = ethers.formatUnits(b, d);
+            note("tStatus", "✅ Token loaded");
+        }
+
+        async function checkAllow() {
+            const sp = $("spender").value.trim();
+            const a = await token.allowance(signer.address, sp);
+            $("allowance").textContent = ethers.formatUnits(a, decimals);
+        }
+
+        async function approve() {
+            const sp = $("spender").value.trim();
+            const tx = await token.approve(sp, ethers.parseUnits($("amount").value, decimals));
+            note("tStatus", "⏳ approving...");
+            await tx.wait();
+            note("tStatus", "✅ Approved");
+            await checkAllow();
+        }
+
+        async function revoke() {
+            const sp = $("spender").value.trim();
+            const tx = await token.approve(sp, 0);
+            note("tStatus", "⏳ revoking...");
+            await tx.wait();
+            note("tStatus", "✅ Revoked");
+            await checkAllow();
+        }
+
+        async function loadHistory() {
+            const addr = signer.address;
+            const sent = await token.queryFilter(token.filters.Transfer(addr, null), 0, "latest");
+            const recv = await token.queryFilter(token.filters.Transfer(null, addr), 0, "latest");
+            const approvals = await token.queryFilter(token.filters.Approval(addr, null), 0, "latest");
+
+            const list = $("historyList");
+            list.innerHTML = "";
+            [...sent, ...recv, ...approvals].forEach(e => {
+                const amt = ethers.formatUnits(e.args[2], decimals);
+                const type = e.eventName === "Approval" ? "Approve" : (e.args[0] === addr ? "Send" : "Receive");
+                const div = document.createElement("div");
+                div.textContent = `${type}: ${short(e.args[0])} → ${short(e.args[1])} | ${amt}`;
+                list.appendChild(div);
+            });
+
+            $("historyBox").style.display = "block";
+            note("tStatus", `📜 ${list.children.length} transaction(s)`);
+        }
+
+        async function connectMetaMask() {
+                if (!window.ethereum) {
+                    return note("status", "❌ MetaMask chưa cài");
+                }
+
+                try {
+                    // Yêu cầu MetaMask mở popup kết nối
+                    const accountsMM = await window.ethereum.request({
+                        method: "eth_requestAccounts"
+                    });
+
+                    provider = new ethers.BrowserProvider(window.ethereum);
+                    signer = await provider.getSigner();
+
+                    $("walletBox").style.display = "block";
+                    $("addr").textContent = short(accountsMM[0]);
+
+                    const balance = await provider.getBalance(accountsMM[0]);
+                    $("ethBal").textContent = ethers.formatEther(balance);
+
+                    note("status", "🦊✅ MetaMask Connected");
+
+                } catch (err) {
+                    note("status", "❌ MetaMask Error: " + err.message);
+                }
+            }
+
+        $("connectMM").onclick = connectMetaMask;
+        $("connect").onclick = connect;
+        $("logout").onclick = () => location.reload();
+        $("loadToken").onclick = loadToken;
+        $("checkAllow").onclick = checkAllow;
+        $("approve").onclick = approve;
+        $("revoke").onclick = revoke;
+        $("historyBtn").onclick = loadHistory;
+    </script>
+</body>
+
+</html>
